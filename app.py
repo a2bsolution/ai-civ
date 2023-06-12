@@ -40,7 +40,7 @@ def compare():
             for idx, url in enumerate(file_urls):
                 response = requests.get(url)
                 filename = url.rsplit('/', 1)[1]
-                predictions = predict(response.content, filename, process_id[idx], user_id)
+                predictions = predict(response.content, filename, process_id[idx], user_id, url)
             return predictions
         else:
             file_obj = request.files.getlist('file')

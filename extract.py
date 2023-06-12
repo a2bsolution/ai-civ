@@ -1,10 +1,10 @@
-import os, shutil, json, glob, re, io, cv2 #keras
+import os, shutil, json, glob, re, io, cv2, collections #keras
 import pandas as pd
 import numpy as np
 import pymssql
 from pymssql import _mssql
 from pdf2image import convert_from_bytes
-from PyPDF2 import PdfFileMerger
+from PyPDF2 import PdfMerger
 from PIL import Image
 from collections import defaultdict
 
@@ -22,6 +22,10 @@ data_folder = "../ai-data/test-ftp-folder/"
 #data_folder = "E:/A2BFREIGHT_MANAGER/"
 #poppler_path = r"C:\Program Files\poppler-21.03.0\Library\bin"
 
+civ_indices = {'EMEDCO': 0, 'FALSE': 1, 'NB1': 2, 'NB2': 3, 'NINGBO': 4}
+model_ids = {0: 'civ2_2' }
+carrier_data = {"TIV_FREIGHTLINX": { "carrier_name": "Freightlinx", "model_1": "ap_freightlinxcfs_1", "model_2": "ap_freightlinxcfs2", "charge_description_filter": ["[0-9]{2}\D+ Delivery", "Storage In Yard", "(?i)Fuel Levy", "DPW Wharf Empty", "Demurrage"] }}
+
 def special_char_filter(filename):
     """
     This function receives a file name string, usually an invoice number, and removes special characters.
@@ -35,11 +39,9 @@ def table_remove_null(table):
             del table[col][index]
     return table
 
-def form_recognizer(document, model_id=default_model_id):
+def form_recognizer_filer(result):
     prediction={}
     table = defaultdict(list)
-    poller = document_analysis_client.begin_analyze_document(model=model_id, document=document)
-    result = poller.result()
 
     for analyzed_document in result.documents:
         print("Document was analyzed by model with ID {}".format(result.model_id))
@@ -63,8 +65,16 @@ def form_recognizer(document, model_id=default_model_id):
 
     return prediction
 
-def form_recognizer_one(document, file_name, page_num, model_id=default_model_id):
-    prediction = form_recognizer(document, model_id)
+def form_recognizer_one(file_name, page_num, model_id=default_model_id, path="", url=""):
+    if path:
+        with open(path, "rb") as fd:
+            document = fd.read()
+        poller = document_analysis_client.begin_analyze_document(model_id=model_id, document=document)
+    else:
+        poller = document_analysis_client.begin_analyze_document_from_url(model_id=model_id, document_url=path, pages=page_num)
+
+    prediction = form_recognizer_filer(poller.result())
+
     prediction['filename'] = file_name
     prediction['page'] = page_num
 
@@ -83,8 +93,6 @@ def multipage_combine(prediction_mult, shared_invoice, pdf_merge = False):
         print(res)
         for invoice_num, pages in res.items():
             page_nums = []
-            #page has the file name, so what we can do is get the file from the split folder
-            #output = PdfFileMerger()
             new_file_name = special_char_filter(invoice_num) + "." +file_ext(pages[0])
             for idx, page in enumerate(pages):
                 if idx==0:
@@ -99,14 +107,29 @@ def multipage_combine(prediction_mult, shared_invoice, pdf_merge = False):
                             page_nums.append(item_value)
                         elif merged_predictions[new_file_name][field] is None and item_value is not None:
                             merged_predictions[new_file_name][field] = item_value
-                #split_file_path = data_folder+"SPLIT/"+page
-                #output.append(split_file_path)
             merged_predictions[new_file_name]['page'] = page_nums
-            #output.write(data_folder+"SPLIT/"+new_file_name)
-            #output.close()
         return merged_predictions
     except Exception as ex:
         return str(ex)
+
+def multipage_extraction(file_url, classifier_count, classification_page_2, classification_page_1, carrier_data, filename, predictions, shared_invoice):
+    #southwestern, freightlinx, power transport
+    last_page = classifier_count[classification_page_2][-1]
+    for idx, page in enumerate(sorted(classifier_count[classification_page_1],reverse=True)):
+        split_file_name = file_name(filename) + "_" + str(idx)
+        split_file_name_ext = split_file_name + "." + file_ext(filename)
+        predictions[split_file_name_ext] = form_recognizer_one(file_url, filename, page, carrier_data["carrier_name"], carrier_data["model_1"], url=True)
+        invoice_num = predictions[split_file_name_ext]['invoice_number']
+        shared_invoice[split_file_name_ext] = invoice_num
+        #predictions[split_file_name_ext]['table']['charge_description'] = charge_description_filter(predictions[split_file_name_ext]['table']['charge_description'], carrier_data["charge_description_filter"])
+        for x in classifier_count[classification_page_2]:
+            if page < x <= last_page:
+                page_two_name = split_file_name+"_"+str(x) +"."+file_ext(filename)
+                predictions[page_two_name] = form_recognizer_one(file_url, filename, x, carrier_data["carrier_name"], carrier_data["model_2"], url=True)
+                shared_invoice[page_two_name] = invoice_num
+                #predictions[page_two_name]['table']['charge_description'] = charge_description_filter(predictions[page_two_name]['table']['charge_description'], carrier_data["charge_description_filter"])
+        last_page = page
+    return predictions, shared_invoice
 
 def query_webservice_user(webservice_user):
     #query the server
@@ -126,17 +149,18 @@ def add_webservice_user(predictions, file, user_query):
     predictions[file]["company_code"] = user_query['company_code']#"SYD"
     return predictions
 
-def predict(file_bytes, filename, process_id, user_id):
+def predict(file_bytes, filename, process_id, user_id, file_url=""):
     predictions = {}
     shared_invoice = {}
+    classifier_count = collections.defaultdict(list)
 
     user_query = query_webservice_user(user_id)
     ext = file_ext(filename)
 
     if ext == "pdf":
         images = convert_from_bytes(file_bytes, grayscale=True, fmt="jpeg") #, poppler_path=poppler_path
-        inputpdf = PdfFileReader(io.BytesIO(file_bytes), strict=False)
-        if inputpdf.isEncrypted:
+        inputpdf = PdfReader(io.BytesIO(file_bytes), strict=False)
+        if inputpdf.is_encrypted:
             try:
                 inputpdf.decrypt('')
                 print('File Decrypted (PyPDF2)')
@@ -145,21 +169,31 @@ def predict(file_bytes, filename, process_id, user_id):
         
         #classify and split
         for page, image in enumerate(images):
-            #pred = classify_page(image)
-            if invoice_page(image) == 1:
-                output = PdfFileWriter()
-                output.addPage(inputpdf.getPage(page)) #pages begin at zero in pdffilewriter
+            pred = classify_page(image)
+            if pred == civ_indices['FALSE']:
+                pass
+            else:
+                output = PdfWriter()
+                output.add_page(inputpdf.pages[page]) #pages begin at zero in pdffilewriter
                 page_num = page+1 #for counters to begin at 1
                 split_file_name = file_name(filename) +"_pg"+str(page_num)+".pdf"
                 split_file_path = data_folder+"SPLIT/"+split_file_name
-                with open(split_file_path, "wb") as outputStream:
-                    output.write(outputStream) #this can be moved to only save when the split file is AP
-                fd = open(split_file_path, "rb")
-                predictions[split_file_name] = form_recognizer_one(document=fd.read(), file_name=filename, page_num=page_num, model_id=default_model_id)
-                shared_invoice[split_file_name] = predictions[split_file_name]['invoice_number']
-                predictions[split_file_name]['table'] = table_remove_null(predictions[split_file_name]['table'])
+                if pred == civ_indices['NB1']:
+                    classifier_count['NB1'].append(page_num)
+                elif pred == civ_indices['NB2']:
+                    classifier_count['NB2'].append(page_num)
+                else:
+                    if file_url:
+                        predictions[split_file_name] = form_recognizer_one(file_url=file_url, file_name=filename, page_num=page_num, model_id=model_ids[pred])
+                    else:
+                        with open(split_file_path, "wb") as outputStream:
+                            output.write(outputStream)
+                        predictions[split_file_name] = form_recognizer_one(path=split_file_path, file_name=filename, page_num=page_num, model_id=model_ids[pred])
+                    shared_invoice[split_file_name] = predictions[split_file_name]['invoice_number']
+                    predictions[split_file_name]['table'] = table_remove_null(predictions[split_file_name]['table'])
 
-        predictions = multipage_combine(predictions, shared_invoice)
+        if classifier_count.get("NB2") and classifier_count.get("NB1"):
+            predictions, shared_invoice = multipage_extraction(file_url, classifier_count, "TIV_FREIGHTLINX_2", "TIV_FREIGHTLINX_1", carrier_data["TIV_FREIGHTLINX"], filename, predictions, shared_invoice)
 
     elif ext in ["jpg", "jpeg", "png",'.bmp','.tiff']:
         pil_image = Image.open(io.BytesIO(file_bytes)).convert('L').convert('RGB') 
@@ -169,11 +203,19 @@ def predict(file_bytes, filename, process_id, user_id):
     else:
         return "File type not allowed."
 
+
+    if len(predictions) > 1:
+            predictions = multipage_combine(predictions, shared_invoice)
+    else:
+        for file in predictions:
+            predictions[file]['page'] = [predictions[file]['page']]
+
     for file in predictions:
         predictions = add_webservice_user(predictions, file, user_query)
         predictions[file]['process_id'] = process_id
-        y = json.dumps(predictions[file], indent=4)
-        with open(data_folder+'PREDICTIONS/'+file_name(file)+'.json', 'w') as outfile:
-            outfile.write(y)
+        payload = {
+            "user_id": user_id, 
+            "jsonstring": json.dumps(predictions[file])
+            }
 
-    return predictions
+    return payload

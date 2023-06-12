@@ -6,11 +6,11 @@ import keras
 import os
 
 from datetime import datetime
-from PyPDF2 import PdfFileWriter, PdfFileReader
+from PyPDF2 import PdfWriter, PdfReader
 from pdf2image import convert_from_path
 from PIL import Image
 
-page_model = keras.models.load_model('models/civ_page.h5')
+carrier_model = keras.models.load_model('models/civ_page.h5')
 ALLOWED_EXTENSIONS = set(['pdf', 'png', 'jpg', 'jpeg', 'bmp', 'docx', 'xlsx', 'xls','tiff'])
 
 #poppler_path = r"C:\Program Files\poppler-21.03.0\Library\bin"
@@ -39,3 +39,7 @@ def invoice_page(image):
     image = img_preprocess(image, 224)
     pred=page_model.predict(image)
     return round(pred[0][0])
+
+def classify_page(image):
+    image = img_preprocess(image, 256)
+    return np.argmax(carrier_model.predict(image))
