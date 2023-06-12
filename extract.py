@@ -24,7 +24,7 @@ data_folder = "../ai-data/test-ftp-folder/"
 
 civ_indices = {'EMEDCO': 0, 'FALSE': 1, 'NB1': 2, 'NB2': 3, 'NINGBO': 4}
 model_ids = {0: 'civ2_2' }
-carrier_data = {"TIV_FREIGHTLINX": { "carrier_name": "Freightlinx", "model_1": "ap_freightlinxcfs_1", "model_2": "ap_freightlinxcfs2", "charge_description_filter": ["[0-9]{2}\D+ Delivery", "Storage In Yard", "(?i)Fuel Levy", "DPW Wharf Empty", "Demurrage"] }}
+carrier_data = {"NB": {"model_1": "civ_nb1", "model_2": "civ_nb2"}}
 
 def special_char_filter(filename):
     """
@@ -39,7 +39,7 @@ def table_remove_null(table):
             del table[col][index]
     return table
 
-def form_recognizer_filer(result):
+def form_recognizer_filter(result):
     prediction={}
     table = defaultdict(list)
 
@@ -65,15 +65,13 @@ def form_recognizer_filer(result):
 
     return prediction
 
-def form_recognizer_one(file_name, page_num, model_id=default_model_id, path="", url=""):
-    if path:
-        with open(path, "rb") as fd:
-            document = fd.read()
+def form_recognizer_one(file_name, page_num, model_id=default_model_id, document="", url=""):
+    if document:
         poller = document_analysis_client.begin_analyze_document(model_id=model_id, document=document)
     else:
-        poller = document_analysis_client.begin_analyze_document_from_url(model_id=model_id, document_url=path, pages=page_num)
+        poller = document_analysis_client.begin_analyze_document_from_url(model_id=model_id, document_url=url, pages=page_num)
 
-    prediction = form_recognizer_filer(poller.result())
+    prediction = form_recognizer_filter(poller.result())
 
     prediction['filename'] = file_name
     prediction['page'] = page_num
@@ -112,20 +110,24 @@ def multipage_combine(prediction_mult, shared_invoice, pdf_merge = False):
     except Exception as ex:
         return str(ex)
 
-def multipage_extraction(file_url, classifier_count, classification_page_2, classification_page_1, carrier_data, filename, predictions, shared_invoice):
-    #southwestern, freightlinx, power transport
+def multipage_extraction(classifier_count, classification_page_2, classification_page_1, carrier_data, filename, predictions, shared_invoice, file_url="", file_bytes=""):
     last_page = classifier_count[classification_page_2][-1]
     for idx, page in enumerate(sorted(classifier_count[classification_page_1],reverse=True)):
         split_file_name = file_name(filename) + "_" + str(idx)
         split_file_name_ext = split_file_name + "." + file_ext(filename)
-        predictions[split_file_name_ext] = form_recognizer_one(file_url, filename, page, carrier_data["carrier_name"], carrier_data["model_1"], url=True)
+
+        if file_url:
+            predictions[split_file_name_ext] = form_recognizer_one(filename, page, carrier_data["model_1"], url=file_url)
+        else:
+            predictions[split_file_name_ext] = form_recognizer_one(document=file_bytes, file_name=filename, page_num=page, model_id=carrier_data["model_1"])
+
         invoice_num = predictions[split_file_name_ext]['invoice_number']
         shared_invoice[split_file_name_ext] = invoice_num
         #predictions[split_file_name_ext]['table']['charge_description'] = charge_description_filter(predictions[split_file_name_ext]['table']['charge_description'], carrier_data["charge_description_filter"])
         for x in classifier_count[classification_page_2]:
             if page < x <= last_page:
                 page_two_name = split_file_name+"_"+str(x) +"."+file_ext(filename)
-                predictions[page_two_name] = form_recognizer_one(file_url, filename, x, carrier_data["carrier_name"], carrier_data["model_2"], url=True)
+                predictions[page_two_name] = form_recognizer_one(filename, x, carrier_data["model_2"], url=file_url, document=file_bytes)
                 shared_invoice[page_two_name] = invoice_num
                 #predictions[page_two_name]['table']['charge_description'] = charge_description_filter(predictions[page_two_name]['table']['charge_description'], carrier_data["charge_description_filter"])
         last_page = page
@@ -173,8 +175,6 @@ def predict(file_bytes, filename, process_id, user_id, file_url=""):
             if pred == civ_indices['FALSE']:
                 pass
             else:
-                output = PdfWriter()
-                output.add_page(inputpdf.pages[page]) #pages begin at zero in pdffilewriter
                 page_num = page+1 #for counters to begin at 1
                 split_file_name = file_name(filename) +"_pg"+str(page_num)+".pdf"
                 split_file_path = data_folder+"SPLIT/"+split_file_name
@@ -186,14 +186,12 @@ def predict(file_bytes, filename, process_id, user_id, file_url=""):
                     if file_url:
                         predictions[split_file_name] = form_recognizer_one(file_url=file_url, file_name=filename, page_num=page_num, model_id=model_ids[pred])
                     else:
-                        with open(split_file_path, "wb") as outputStream:
-                            output.write(outputStream)
-                        predictions[split_file_name] = form_recognizer_one(path=split_file_path, file_name=filename, page_num=page_num, model_id=model_ids[pred])
+                        predictions[split_file_name] = form_recognizer_one(document=file_bytes, file_name=filename, page_num=page_num, model_id=model_ids[pred])
                     shared_invoice[split_file_name] = predictions[split_file_name]['invoice_number']
                     predictions[split_file_name]['table'] = table_remove_null(predictions[split_file_name]['table'])
 
         if classifier_count.get("NB2") and classifier_count.get("NB1"):
-            predictions, shared_invoice = multipage_extraction(file_url, classifier_count, "TIV_FREIGHTLINX_2", "TIV_FREIGHTLINX_1", carrier_data["TIV_FREIGHTLINX"], filename, predictions, shared_invoice)
+            predictions, shared_invoice = multipage_extraction(classifier_count, "NB2", "NB1", carrier_data["NB"], filename, predictions, shared_invoice, file_bytes=file_bytes)
 
     elif ext in ["jpg", "jpeg", "png",'.bmp','.tiff']:
         pil_image = Image.open(io.BytesIO(file_bytes)).convert('L').convert('RGB') 
