@@ -44,22 +44,22 @@ def form_recognizer_filter(result):
     table = defaultdict(list)
 
     for analyzed_document in result.documents:
-        print("Document was analyzed by model with ID {}".format(result.model_id))
-        print("Document has confidence {}".format(analyzed_document.confidence))
+        #print("Document was analyzed by model with ID {}".format(result.model_id))
+        #print("Document has confidence {}".format(analyzed_document.confidence))
         for name, field in analyzed_document.fields.items():
             if name=='table':
                 #print("Field '{}' ".format(name))
                 for row in field.value:
                     row_content = row.value
                     for key, item in row_content.items():
-                        print('Field {} has value {}'.format(key, item.value))
+                        #print('Field {} has value {}'.format(key, item.value))
                         if key == "origin" and item.value:
                             table[key].append(special_char_filter(item.value))
                         else:
                             table[key].append(item.value)
             else:
                 prediction[name]=field.value
-                print("Field '{}' has value '{}' with confidence of {}".format(name, field.value, field.confidence))
+                #print("Field '{}' has value '{}' with confidence of {}".format(name, field.value, field.confidence))
 
         prediction['table'] = table
 
@@ -88,7 +88,6 @@ def multipage_combine(prediction_mult, shared_invoice, pdf_merge = False):
         for i, v in shared_invoice.items():
             res[v] = [i] if v not in res.keys() else res[v] + [i]
         merged_predictions = {}
-        print(res)
         for invoice_num, pages in res.items():
             page_nums = []
             new_file_name = special_char_filter(invoice_num) + "." +file_ext(pages[0])
@@ -151,7 +150,27 @@ def add_webservice_user(predictions, file, user_query):
     predictions[file]["company_code"] = user_query['company_code']#"SYD"
     return predictions
 
-def predict(file_bytes, filename, process_id, user_id, file_url=""):
+def push_parsed_inv(process_id, user_id, uploaded_by, date_uploaded, filename="", file_url="", num_pages=None):
+    conn = pymssql.connect('a2bserver.database.windows.net', 'A2B_Admin', 'v9jn9cQ9dF7W', 'a2bcargomation_db')
+    #conn = pymssql.connect('a2bserver.database.windows.net', 'A2B_Admin', 'v9jn9cQ9dF7W', 'dev.a2bcargomation_db')
+    cursor = conn.cursor(as_dict=True)
+    cursor.execute("""
+        IF EXISTS (SELECT TOP 1 1 FROM [dbo].[document_upload_compile] WHERE [process_id]=%s)
+            BEGIN
+            UPDATE [dbo].[document_upload_compile] SET [dateuploaded]=%s WHERE [process_id]=%s
+            END
+        ELSE
+            BEGIN
+            INSERT INTO [dbo].[document_upload_compile] (user_id, filename, filepath, dateuploaded, uploadedby, status, num_pages) VALUES (%s,%s,%s,%s,%s,%s,%s)
+            END
+        """,
+        (process_id, date_uploaded, process_id, user_id, filename, file_url, date_uploaded, uploaded_by, "processing", num_pages)) 
+
+    conn.commit()
+    cursor.close()
+
+
+def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploaded, file_url=""):
     predictions = {}
     shared_invoice = {}
     classifier_count = collections.defaultdict(list)
@@ -165,7 +184,7 @@ def predict(file_bytes, filename, process_id, user_id, file_url=""):
         if inputpdf.is_encrypted:
             try:
                 inputpdf.decrypt('')
-                print('File Decrypted (PyPDF2)')
+                #print('File Decrypted (PyPDF2)')
             except:
                 print("Decryption error")
         
@@ -215,5 +234,7 @@ def predict(file_bytes, filename, process_id, user_id, file_url=""):
             "user_id": user_id, 
             "jsonstring": json.dumps(predictions[file])
             }
+        push_parsed_inv(process_id, user_id, uploaded_by, date_uploaded, filename, file_url, len(predictions[file]['page']))
+
 
     return payload

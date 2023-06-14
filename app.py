@@ -33,21 +33,18 @@ def compare():
         #try:
         user_id = request.form['user_id']
         process_id = literal_eval(request.form['process_id'])
+        uploaded_by = request.form['uploadedby']
+        date_uploaded = request.form['dateuploaded']
 
         if "file" in request.form:
-            file_urls = literal_eval(request.form['file'])
-            #return extract_compare((file_urls), user_id, process_id)
-            for idx, url in enumerate(file_urls):
-                response = requests.get(url)
-                filename = url.rsplit('/', 1)[1]
-                predictions = predict(response.content, filename, process_id[idx], user_id, url)
-            return predictions
+            file_url = literal_eval(request.form['file'])
+            response = requests.get(file_url)
+            filename = url.rsplit('/', 1)[1]
+            return predict(response.content, filename, process_id, user_id , uploaded_by, date_uploaded, file_url)
         else:
-            file_obj = request.files.getlist('file')
-            if file_obj[0].filename != '':
-                for idx, obj in enumerate(file_obj):
-                    predictions = predict(obj.read(), obj.filename, process_id[idx], user_id)
-                return predictions
+            file_obj = request.files.getlist('file')[0]
+            if file_obj.filename != '':
+                return predict(file_obj.read(), file_obj.filename, process_id, user_id, uploaded_by, date_uploaded)
             else:
                 return "No file submitted."
 
