@@ -150,21 +150,21 @@ def add_webservice_user(predictions, file, user_query):
     predictions[file]["company_code"] = user_query['company_code']#"SYD"
     return predictions
 
-def push_parsed_inv(process_id, user_id, uploaded_by, date_uploaded, filename="", file_url="", num_pages=None):
+def push_parsed_inv(predictions, process_id, user_id, uploaded_by, date_uploaded, filename="", file_url="", num_pages=None):
     conn = pymssql.connect('a2bserver.database.windows.net', 'A2B_Admin', 'v9jn9cQ9dF7W', 'a2bcargomation_db')
     #conn = pymssql.connect('a2bserver.database.windows.net', 'A2B_Admin', 'v9jn9cQ9dF7W', 'dev.a2bcargomation_db')
     cursor = conn.cursor(as_dict=True)
     cursor.execute("""
         IF EXISTS (SELECT TOP 1 1 FROM [dbo].[document_upload_compile] WHERE [process_id]=%s)
             BEGIN
-            UPDATE [dbo].[document_upload_compile] SET [dateuploaded]=%s WHERE [process_id]=%s
+            UPDATE [dbo].[document_upload_compile] SET [parsed_inv]=%s WHERE [process_id]=%s
             END
         ELSE
             BEGIN
-            INSERT INTO [dbo].[document_upload_compile] (user_id, filename, filepath, dateuploaded, uploadedby, status, num_pages) VALUES (%s,%s,%s,%s,%s,%s,%s)
+            INSERT INTO [dbo].[document_upload_compile] (user_id, filename, filepath, dateuploaded, uploadedby, status, num_pages, parsed_inv) VALUES (%s,%s,%s,%s,%s,%s,%s)
             END
         """,
-        (process_id, date_uploaded, process_id, user_id, filename, file_url, date_uploaded, uploaded_by, "processing", num_pages)) 
+        (process_id, predictions, process_id, user_id, filename, file_url, date_uploaded, uploaded_by, "processing", num_pages, predictions)) 
 
     conn.commit()
     cursor.close()
@@ -234,7 +234,7 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
             "user_id": user_id, 
             "jsonstring": json.dumps(predictions[file])
             }
-        push_parsed_inv(process_id, user_id, uploaded_by, date_uploaded, filename, file_url, len(predictions[file]['page']))
+        push_parsed_inv(json.dumps(payload), process_id, user_id, uploaded_by, date_uploaded, filename, file_url, len(predictions[file]['page']))
 
 
     return payload
