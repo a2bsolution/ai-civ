@@ -44,30 +44,31 @@ def form_recognizer_filter(result):
     table = defaultdict(list)
 
     for analyzed_document in result.documents:
-        #print("Document was analyzed by model with ID {}".format(result.model_id))
+        print("Document was analyzed by model with ID {}".format(result.model_id))
         #print("Document has confidence {}".format(analyzed_document.confidence))
         for name, field in analyzed_document.fields.items():
             if name=='table':
-                #print("Field '{}' ".format(name))
+                print("Field '{}' ".format(name))
                 for row in field.value:
                     row_content = row.value
                     for key, item in row_content.items():
-                        #print('Field {} has value {}'.format(key, item.value))
+                        print('Field {} has value {}'.format(key, item.value))
                         if key == "origin" and item.value:
                             table[key].append(special_char_filter(item.value))
                         else:
                             table[key].append(item.value)
             else:
                 prediction[name]=field.value
-                #print("Field '{}' has value '{}' with confidence of {}".format(name, field.value, field.confidence))
+                print("Field '{}' has value '{}' with confidence of {}".format(name, field.value, field.confidence))
 
         prediction['table'] = table
+        print(table)
 
     return prediction
 
 def form_recognizer_one(file_name, page_num, model_id=default_model_id, document="", url=""):
     if document:
-        poller = document_analysis_client.begin_analyze_document(model_id=model_id, document=document)
+        poller = document_analysis_client.begin_analyze_document(model_id=model_id, document=document, pages=page_num)
     else:
         poller = document_analysis_client.begin_analyze_document_from_url(model_id=model_id, document_url=url, pages=page_num)
 
