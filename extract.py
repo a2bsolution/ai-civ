@@ -161,7 +161,7 @@ def push_parsed_inv(predictions, process_id, user_id, uploaded_by, date_uploaded
             END
         ELSE
             BEGIN
-            INSERT INTO [dbo].[document_upload_compile] (user_id, filename, filepath, dateuploaded, uploadedby, status, num_pages, parsed_inv) VALUES (%s,%s,%s,%s,%s,%s,%s)
+            INSERT INTO [dbo].[document_upload_compile] (user_id, filename, filepath, dateuploaded, uploadedby, status, num_pages, parsed_inv) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
             END
         """,
         (process_id, predictions, process_id, user_id, filename, file_url, date_uploaded, uploaded_by, "processing", num_pages, predictions)) 
