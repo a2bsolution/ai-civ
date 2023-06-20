@@ -35,16 +35,17 @@ def compare():
         process_id = literal_eval(request.form['process_id'])
         uploaded_by = request.form['uploadedby']
         date_uploaded = request.form['dateuploaded']
+        shipment_num = request.form['shipment_num']
 
         if "file" in request.form:
             file_url = literal_eval(request.form['file'])
             response = requests.get(file_url)
             filename = url.rsplit('/', 1)[1]
-            return predict(response.content, filename, process_id, user_id , uploaded_by, date_uploaded, file_url)
+            return predict(response.content, filename, process_id, user_id , uploaded_by, date_uploaded, shipment_num, file_url)
         else:
             file_obj = request.files.getlist('file')[0]
             if file_obj.filename != '':
-                return predict(file_obj.read(), file_obj.filename, process_id, user_id, uploaded_by, date_uploaded)
+                return predict(file_obj.read(), file_obj.filename, process_id, user_id, uploaded_by, date_uploaded, shipment_num)
             else:
                 return "No file submitted."
 
