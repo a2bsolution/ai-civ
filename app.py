@@ -38,9 +38,9 @@ def compare():
         shipment_num = request.form['shipment_num']
 
         if "file" in request.form:
-            file_url = literal_eval(request.form['file'])
+            file_url = request.form['file']
             response = requests.get(file_url)
-            filename = url.rsplit('/', 1)[1]
+            filename = file_url.rsplit('/', 1)[1]
             return predict(response.content, filename, process_id, user_id , uploaded_by, date_uploaded, shipment_num, file_url)
         else:
             file_obj = request.files.getlist('file')[0]
