@@ -44,22 +44,22 @@ def form_recognizer_filter(result):
     table = defaultdict(list)
 
     for analyzed_document in result.documents:
-        print("Document was analyzed by model with ID {}".format(result.model_id))
+        #print("Document was analyzed by model with ID {}".format(result.model_id))
         #print("Document has confidence {}".format(analyzed_document.confidence))
         for name, field in analyzed_document.fields.items():
             if name=='table':
-                print("Field '{}' ".format(name))
+                #print("Field '{}' ".format(name))
                 for row in field.value:
                     row_content = row.value
                     for key, item in row_content.items():
-                        print('Field {} has value {}'.format(key, item.value))
+                        #print('Field {} has value {}'.format(key, item.value))
                         if key == "origin" and item.value:
                             table[key].append(special_char_filter(item.value))
                         else:
                             table[key].append(item.value)
             else:
                 prediction[name]=field.value
-                print("Field '{}' has value '{}' with confidence of {}".format(name, field.value, field.confidence))
+                #print("Field '{}' has value '{}' with confidence of {}".format(name, field.value, field.confidence))
 
         prediction['table'] = table
 
@@ -230,11 +230,12 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
     for file in predictions:
         predictions = add_webservice_user(predictions, file, user_query)
         predictions[file]['process_id'] = process_id
+        predictions[file]['user_id'] = user_id
         payload = {
-            "user_id": user_id, 
-            "jsonstring": json.dumps(predictions[file])
-            }
-        push_parsed_inv(json.dumps(payload), process_id, user_id, uploaded_by, date_uploaded, shipment_num, filename, file_url, len(predictions[file]['page']))
+                "user_id": user_id, 
+                "jsonstring": json.dumps(predictions[file])
+                }
 
+        push_parsed_inv(json.dumps(predictions[file]), process_id, user_id, uploaded_by, date_uploaded, shipment_num, filename, file_url, len(predictions[file]['page']))
 
     return payload
