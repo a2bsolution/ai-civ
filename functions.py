@@ -9,8 +9,10 @@ from datetime import datetime
 from PyPDF2 import PdfWriter, PdfReader
 from pdf2image import convert_from_path
 from PIL import Image
+from tensorflow.keras.layers import BatchNormalization
 
-carrier_model = keras.models.load_model('models/civ_page.h5')
+
+carrier_model = keras.models.load_model('models/civ_page_3.h5')
 ALLOWED_EXTENSIONS = set(['pdf', 'png', 'jpg', 'jpeg', 'bmp', 'docx', 'xlsx', 'xls','tiff'])
 
 #poppler_path = r"C:\Program Files\poppler-21.03.0\Library\bin"

@@ -22,8 +22,8 @@ data_folder = "../ai-data/test-ftp-folder/"
 #data_folder = "E:/A2BFREIGHT_MANAGER/"
 #poppler_path = r"C:\Program Files\poppler-21.03.0\Library\bin"
 
-civ_indices = {'EMEDCO': 0, 'FALSE': 1, 'NB1': 2, 'NB2': 3, 'NINGBO': 4}
-model_ids = {0: 'civ2_2' }
+civ_indices = {'DEANS': 0, 'EMEDCO': 1, 'FALSE': 2, 'NB1': 3, 'NB2': 4, 'NINGBO': 5}
+model_ids = {0: "civ_deans", 1: "civ2_2" }
 carrier_data = {"NB": {"model_1": "civ_nb1", "model_2": "civ_nb2"}}
 
 def special_char_filter(filename):
