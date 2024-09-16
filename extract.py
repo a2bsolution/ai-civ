@@ -203,7 +203,7 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
                     classifier_count['NB2'].append(page_num)
                 else:
                     if file_url:
-                        predictions[split_file_name] = form_recognizer_one(file_url=file_url, file_name=filename, page_num=page_num, model_id=model_ids[pred])
+                        predictions[split_file_name] = form_recognizer_one(url=file_url, file_name=filename, page_num=page_num, model_id=model_ids[pred])
                     else:
                         predictions[split_file_name] = form_recognizer_one(document=file_bytes, file_name=filename, page_num=page_num, model_id=model_ids[pred])
                     shared_invoice[split_file_name] = predictions[split_file_name]['invoice_number']
