@@ -9,6 +9,7 @@ from PIL import Image
 from collections import defaultdict
 
 from functions import * 
+from excel import *
 
 from azure.core.exceptions import ResourceNotFoundError
 from azure.ai.formrecognizer import DocumentAnalysisClient, AnalyzeResult
@@ -133,13 +134,17 @@ def multipage_extraction(classifier_count, classification_page_2, classification
     return predictions, shared_invoice
 
 def query_webservice_user(webservice_user):
-    #query the server
     conn = pymssql.connect('a2bserver.database.windows.net', 'A2B_Admin', 'v9jn9cQ9dF7W', 'a2bcargomation_db')
     cursor = conn.cursor(as_dict=True)
     cursor.execute("SELECT TOP (1) * FROM [dbo].[user_webservice] WHERE [user_id] = %s", webservice_user)
-    user_query=cursor.fetchone()
+    query = cursor.fetchone()
+    if query is None:
+        cursor.execute("SELECT TOP (1) * FROM [dbo].[vrpt_subaccount] WHERE [user_id] = %s", webservice_user)
+        query = cursor.fetchone()
+        cursor.execute("SELECT TOP (1) * FROM [dbo].[user_webservice] WHERE [user_id] = %s", query["account_id"])
+        query=cursor.fetchone()
     cursor.close()
-    return user_query
+    return query
 
 def add_webservice_user(predictions, file, user_query):
     predictions[file]["webservice_link"] = user_query['webservice_link'] #"https://a2btrnservices.wisegrid.net/eAdaptor"  
@@ -217,6 +222,13 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
         if invoice_page(pil_image) == 1:
             predictions[filename] = form_recognizer_one(document=file_bytes, file_name=filename, page_num=1, model_id=default_model_id)
             predictions[filename]['table'] = table_remove_null(predictions[filename]['table'])
+    
+    elif ext == 'xlsx':
+        predictions[filename] = extract_xlsx(pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl', sheet_name=0, header=None))
+
+    elif ext == 'xls':
+        predictions[filename] = extract_xls(pd.read_excel(io.BytesIO(file_bytes), engine='xlrd', sheet_name=0, header=None))
+
     else:
         return "File type not allowed."
 

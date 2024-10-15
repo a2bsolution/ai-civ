@@ -1,0 +1,16 @@
+Flask==3.0.3
+requests==2.32.3
+DateTime==5.5
+pandas==2.2.2
+numpy==1.26.4
+pymssql==2.3.1
+pdf2image==1.17.0
+pypdf2==3.0.1
+pillow==10.4.0
+azure-ai-formrecognizer==3.3.3
+opencv-python-headless==4.10.0.84
+tensorflow==2.15.0
+keras==2.15.0
+gunicorn==23.0.0
+openpyxl==3.1.5
+xlrd==2.0.1
