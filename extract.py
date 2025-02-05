@@ -12,19 +12,22 @@ from functions import *
 from excel import *
 
 from azure.core.exceptions import ResourceNotFoundError
-from azure.ai.formrecognizer import DocumentAnalysisClient, AnalyzeResult
+#from azure.ai.formrecognizer import DocumentAnalysisClient, AnalyzeResult
 from azure.core.credentials import AzureKeyCredential
+
+from azure.ai.documentintelligence import DocumentIntelligenceClient
+from azure.ai.documentintelligence.models import AnalyzeResult, AnalyzeDocumentRequest
 
 endpoint = "https://ai-cargomation.cognitiveservices.azure.com/"
 credential = AzureKeyCredential("a6a3fb5f929541648c788d45e6566603")
-document_analysis_client = DocumentAnalysisClient(endpoint, credential)
+document_analysis_client = DocumentIntelligenceClient(endpoint, credential)
 default_model_id = "civ2_2"
 data_folder = "../ai-data/test-ftp-folder/"
 #data_folder = "E:/A2BFREIGHT_MANAGER/"
 #poppler_path = r"C:\Program Files\poppler-21.03.0\Library\bin"
 
-civ_indices = {'DEANS': 0, 'EMEDCO': 1, 'FALSE': 2, 'NB1': 3, 'NB2': 4, 'NINGBO': 5}
-model_ids = {0: "civ_deans", 1: "civ2_2" }
+civ_indices = {'DEANS': 0, 'EMEDCO': 1, 'FALSE': 2, 'NB1': 3, 'NB2': 4, 'NINGBO': 5, 'WHITE_FEATHERS': 6}
+model_ids = {0: "civ_deans", 1: "civ2_2", 6: "wf_neural"}
 carrier_data = {"NB": {"model_1": "civ_nb1", "model_2": "civ_nb2"}}
 
 def special_char_filter(filename):
@@ -44,35 +47,44 @@ def form_recognizer_filter(result):
     prediction={}
     table = defaultdict(list)
 
-    for analyzed_document in result.documents:
-        #print("Document was analyzed by model with ID {}".format(result.model_id))
-        #print("Document has confidence {}".format(analyzed_document.confidence))
-        for name, field in analyzed_document.fields.items():
-            if name=='table':
-                #print("Field '{}' ".format(name))
-                for row in field.value:
-                    row_content = row.value
-                    for key, item in row_content.items():
-                        #print('Field {} has value {}'.format(key, item.value))
-                        if key == "origin" and item.value:
-                            table[key].append(special_char_filter(item.value))
-                        else:
-                            table[key].append(item.value)
-            else:
-                prediction[name]=field.value
-                #print("Field '{}' has value '{}' with confidence of {}".format(name, field.value, field.confidence))
+    if result.documents:
+        for analyzed_document in result.documents:
+            #print("Document was analyzed by model with ID {}".format(result.model_id))
+            #print("Document has confidence {}".format(analyzed_document.confidence))
+            for name, field in analyzed_document.fields.items():
+                if name=='table':
+                    for row in field.value_array:
+                        row_value = row['valueObject']
+                        for key, item in row_value.items():
+                            field_value = item.get("valueString") if item.get("valueString") else item.content
+                            #print('Field {} has value {}'.format(key, field_value))
+                            if key == "origin" and field_value:
+                                table[key].append(special_char_filter(field_value))
+                            else:
+                                table[key].append(field_value)
+                elif name == "incoterm":
+                    field_value = field.get("valueString") if field.get("valueString") else field.content
+                    if field_value:
+                        prediction[name] = special_char_filter(field_value)
+                else:
+                    field_value = field.get("valueString") if field.get("valueString") else field.content
+                    prediction[name] = field_value
+                    #print("Field '{}' has value '{}' with confidence of {}".format(name, field_value, field.confidence))
 
-        prediction['table'] = table
+            prediction['table'] = table
 
     return prediction
 
 def form_recognizer_one(file_name, page_num, model_id=default_model_id, document="", url=""):
-    if document:
-        poller = document_analysis_client.begin_analyze_document(model_id=model_id, document=document, pages=page_num)
-    else:
-        poller = document_analysis_client.begin_analyze_document_from_url(model_id=model_id, document_url=url, pages=page_num)
+    page_num = ",".join(map(str, page_num))
 
-    prediction = form_recognizer_filter(poller.result())
+    if document:
+        poller = document_analysis_client.begin_analyze_document(model_id=model_id, analyze_request=AnalyzeDocumentRequest(bytes_source=document), pages=page_num)
+    else:
+        poller = document_analysis_client.begin_analyze_document(model_id=model_id, analyze_request=AnalyzeDocumentRequest(url_source=url), pages=page_num)
+
+    result: AnalyzeResult = poller.result()
+    prediction = form_recognizer_filter(result)
 
     prediction['filename'] = file_name
     prediction['page'] = page_num
@@ -179,6 +191,7 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
     predictions = {}
     shared_invoice = {}
     classifier_count = collections.defaultdict(list)
+    classified_pages = collections.defaultdict(list)
 
     user_query = query_webservice_user(user_id)
     ext = file_ext(filename)
@@ -196,21 +209,22 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
         #classify and split
         for page, image in enumerate(images):
             pred = classify_page(image)
+            classified_pages[pred].append(page+1)
+
+        for pred in classified_pages:
             if pred == civ_indices['FALSE']:
                 pass
             else:
-                page_num = page+1 #for counters to begin at 1
-                split_file_name = file_name(filename) +"_pg"+str(page_num)+".pdf"
-                split_file_path = data_folder+"SPLIT/"+split_file_name
+                split_file_name = file_name(filename) +"_pg"+str(classified_pages[pred])+".pdf"
                 if pred == civ_indices['NB1']:
-                    classifier_count['NB1'].append(page_num)
+                    classifier_count['NB1'].append(classified_pages[pred])
                 elif pred == civ_indices['NB2']:
-                    classifier_count['NB2'].append(page_num)
+                    classifier_count['NB2'].append(classified_pages[pred])
                 else:
                     if file_url:
-                        predictions[split_file_name] = form_recognizer_one(url=file_url, file_name=filename, page_num=page_num, model_id=model_ids[pred])
+                        predictions[split_file_name] = form_recognizer_one(url=file_url, file_name=filename, page_num=classified_pages[pred], model_id=model_ids[pred])
                     else:
-                        predictions[split_file_name] = form_recognizer_one(document=file_bytes, file_name=filename, page_num=page_num, model_id=model_ids[pred])
+                        predictions[split_file_name] = form_recognizer_one(document=file_bytes, file_name=filename, page_num=classified_pages[pred], model_id=model_ids[pred])
                     shared_invoice[split_file_name] = predictions[split_file_name]['invoice_number']
                     predictions[split_file_name]['table'] = table_remove_null(predictions[split_file_name]['table'])
 
@@ -233,11 +247,11 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
         return "File type not allowed."
 
 
-    if len(predictions) > 1:
-            predictions = multipage_combine(predictions, shared_invoice)
-    else:
-        for file in predictions:
-            predictions[file]['page'] = [predictions[file]['page']]
+    #if len(predictions) > 1:
+            #predictions = multipage_combine(predictions, shared_invoice)
+    #else:
+        #for file in predictions:
+            #predictions[file]['page'] = [predictions[file]['page']]
 
     for file in predictions:
         predictions = add_webservice_user(predictions, file, user_query)
