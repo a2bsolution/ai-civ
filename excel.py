@@ -1,17 +1,8 @@
 import pandas as pd
+import numpy as np
 import re
+from functions import container_separate
 
-
-def words_in_string(word_list, a_string):
-    return set(word_list).intersection(a_string.split())
-
-def temp_currency_filter(currency):
-	currency = re.sub('[^A-Za-z ]+', '', currency)
-	curr_list = ['AUD', 'USD', 'EUR']
-	if currency:
-		for word in words_in_string(curr_list, currency.upper()):
-			return word
-			break
 
 def incoterm_filter(incoterm):
 	incoterm = re.sub('[^A-Za-z ]+', '', incoterm).upper()
@@ -24,11 +15,8 @@ def incoterm_filter(incoterm):
 	return None
 
 def extract_xlsx(df):
-	prediction = {}
-	prediction['page'] = [1]
-	prediction['supplier'] = df.iloc[0].dropna().iloc[0].strip() if not df.iloc[0].dropna().empty else None
-	prediction['invoice_number'] = None
-	prediction['incoterm'] = None
+	prediction = {'page': [1], 'invoice_number': None, 'incoterm': None, 'container': None}
+	prediction['supplier'] = next((val for row in df.itertuples(index=False) for val in row if pd.notna(val)), None)
 
 	# Iterate through the DataFrame to find the necessary values
 	for row in df.iterrows():
@@ -58,8 +46,12 @@ def extract_xlsx(df):
 					else:
 						prediction['incoterm'] = incoterm_filter(str(prediction['incoterm']).split()[0])
 
+				elif "container" in value_clean:
+					if col_idx + 1 < df.shape[1] and pd.notna(df.iloc[row_idx, col_idx + 1]) and str(df.iloc[row_idx, col_idx + 1]).strip():
+						prediction['container'] = container_separate(df.iloc[row_idx, col_idx + 1])[0]
+
 			# If both values are found, exit the loop early
-		if prediction['invoice_number'] is not None and prediction['incoterm'] is not None:
+		if prediction['invoice_number'] is not None and prediction['incoterm'] is not None and prediction['container'] is not None:
 			break
 
 	item_no_row_index = df[df.apply(lambda row: row.astype(str).str.contains("ITEM NO", case=False, na=False).any(), axis=1)].index
@@ -68,46 +60,60 @@ def extract_xlsx(df):
 		table_headers = df.iloc[header_row]  # Grab the headers from row 20
 		table_df = df.iloc[header_row + 1:]  # Extract the data from the rows below the headers
 
-		try:
-			prediction['currency'] = temp_currency_filter(df.iloc[header_row, 4])
-			table_df = table_df.iloc[:, :5] 
-			custom_headers = ['product_code', 'goods_description', 'invoice_quantity', 'unit_price', 'price']
-			table_df.columns = custom_headers
+		normalized_headers = table_headers.astype(str).str.strip().str.lower()
+		matching_columns = normalized_headers[normalized_headers.str.contains("total gross weight", na=False)]
+		total_weight_col_idx = matching_columns.index[0] if not matching_columns.empty else -1
 
-			table_df = table_df.dropna(how='all')  # Drop rows that are entirely empty
+		#try:
+		prediction['currency'] = df.iloc[header_row, 4]
+		table_df = table_df.iloc[:, :5] 
+		table_df = table_df.dropna(how='all')  # Drop rows that are entirely empty
 
-			# Stop reading the table when "Inland Charge USD" or "Total" is encountered in the first column
-			for index, row in reversed(list(table_df.iterrows())):
-				if isinstance(row.iloc[0], str) and "inland charge" in row.iloc[0].lower(): #for some reason row points to row after inland charge
-					table_df = table_df.loc[:index - 2]  # Only keep rows before this point, and drop the last row
-					last_row_value = re.sub('[^0-9.]+', '', str(table_df.iloc[-1, 4]))  # Get the value in column E (index 4) of the last row
-					prediction['total'] = round(float(last_row_value), 2)
-					break
-				elif isinstance(row.iloc[0], str) and "total" in row.iloc[0].lower(): #row points to total row
-					table_df = table_df.loc[:index - 1]
-					prediction['total'] = round(float(row.iloc[4]), 2)
+		# Stop reading the table when "Inland Charge USD" or "Total" is encountered in the first column
+		for index, row in reversed(list(table_df.iterrows())):
+			if isinstance(row.iloc[0], str) and "inland charge" in row.iloc[0].lower(): #for some reason row points to row after inland charge
+				table_df = table_df.loc[:index - 2]  # Only keep rows before this point, and drop the last row
+				last_row_value = re.sub('[^0-9.]+', '', str(table_df.iloc[-1, 4]))  # Get the value in column E (index 4) of the last row
+				prediction['total'] = round(float(last_row_value), 2)
 
-			if not table_df.empty:
-				table_df = table_df.dropna(subset=[table_df.columns[0], table_df.columns[1]])  # Remove NaN values
-				table_df = table_df[table_df.iloc[:, 0].str.strip().astype(bool) & table_df.iloc[:, 1].str.strip().astype(bool)] # Remove rows where first or second column is empty or only spaces
+				if total_weight_col_idx != -1:
+					total_weight_value = df.iloc[index-2, total_weight_col_idx]
+					cleaned_weight = re.sub(r'[^0-9.]+', '', str(total_weight_value))
+					prediction['total_weight'] = round(float(cleaned_weight), 2) if cleaned_weight else 0.0
 
-			# Set the headers as column names of the table DataFrame
-			table_headers = ['product_code', 'goods_description', 'invoice_quantity', 'unit_price', 'price']
-			table_df.columns = table_headers
-			table_df['unit_quantity'] = ["Piece"] * len(table_df['invoice_quantity'])
+				break
+			elif isinstance(row.iloc[0], str) and "total" in row.iloc[0].lower(): #row points to total row
+				table_df = table_df.loc[:index - 1]
+				prediction['total'] = round(float(row.iloc[4]), 2)
 
-			prediction['table'] = table_df.to_dict(orient='list')
-		except:
-			return prediction
+				if total_weight_col_idx != -1:
+					total_weight_value = df.iloc[index,total_weight_col_idx]
+					cleaned_weight = re.sub(r'[^0-9.]+', '', str(total_weight_value))
+					prediction['total_weight'] = round(float(cleaned_weight), 2) if cleaned_weight else 0.0
+
+				break
+
+		if not table_df.empty:
+			table_df = table_df[~table_df.iloc[:, 0].astype(str).str.contains("total", case=False, na=False)]
+			table_df = table_df.dropna(subset=[table_df.columns[0], table_df.columns[1]])  # Remove NaN values
+			table_df = table_df[table_df.iloc[:, 0].str.strip().astype(bool) & table_df.iloc[:, 1].str.strip().astype(bool)] # Remove rows where first or second column is empty or only spaces
+
+		# Set the headers as column names of the table DataFrame
+		#table_df = table_df.iloc[:, :5] 
+		table_headers = ['product_code', 'goods_description', 'invoice_quantity', 'unit_price', 'price']
+		table_df.columns = table_headers
+		table_df['unit_quantity'] = ["Piece"] * len(table_df['invoice_quantity'])
+
+		prediction['table'] = table_df.to_dict(orient='list')
+		#except:
+			#return prediction
 
 	return prediction
 
 def extract_xls(df):
-	prediction = {}
-	prediction['page'] = [1]
-	prediction['supplier'] = df.iloc[0].dropna().iloc[0].strip() if not df.iloc[0].dropna().empty else None
-	prediction['invoice_number'] = None
-	prediction['incoterm'] = None
+	prediction = {'page': [1], 'invoice_number': None, 'incoterm': None, 'container': None}
+
+	prediction['supplier'] = next((val for row in df.itertuples(index=False) for val in row if pd.notna(val)), None)
 
 	# Iterate through the DataFrame to find the necessary values
 	for row in df.iterrows():
@@ -133,8 +139,12 @@ def extract_xls(df):
 					else:
 						prediction['incoterm'] = incoterm_filter(str(prediction['incoterm']).split()[0])
 
+				elif "container" in value_clean:
+					if col_idx + 1 < df.shape[1] and pd.notna(df.iloc[row_idx, col_idx + 1]) and str(df.iloc[row_idx, col_idx + 1]).strip():
+						prediction['container'] = container_separate(df.iloc[row_idx, col_idx + 1])[0]
+
 			# If both values are found, exit the loop early
-		if prediction['invoice_number'] is not None and prediction['incoterm'] is not None:
+		if prediction['invoice_number'] is not None and prediction['incoterm'] is not None and prediction['container'] is not None:
 			break
 
 	item_no_positions = df.apply(lambda row: row.astype(str).str.contains("ITEM NO", case=False, na=False), axis=1)
@@ -144,11 +154,14 @@ def extract_xls(df):
 	if not first_item_no_position.empty:
 		table_headers = df.iloc[header_row]
 		table_df = df.iloc[header_row + 1:]  # Extract the data from the rows below the headers
-		prediction['currency'] = temp_currency_filter(df.iloc[header_row, 4])
 
-		table_df = table_df.iloc[:, header_col:header_col+5] 
-		custom_headers = ['product_code', 'goods_description', 'invoice_quantity', 'unit_price', 'price']
-		table_df.columns = custom_headers
+		normalized_headers = table_headers.astype(str).str.strip().str.lower()
+		matching_columns = normalized_headers[normalized_headers.str.contains("total gross weight", na=False)]
+		total_weight_col_idx = matching_columns.index[0] if not matching_columns.empty else -1
+
+		prediction['currency'] = df.iloc[header_row, 4]
+
+		table_df = table_df.iloc[:, header_col:header_col+5]
 		table_df = table_df.dropna(how='all')  # Drop rows that are entirely empty
 
 		for index, row in table_df.iterrows():
@@ -156,6 +169,11 @@ def extract_xls(df):
 				table_df = table_df.loc[:index - 1]  # Only keep rows before this point
 				last_row_value = re.sub('[^0-9.]+', '', str(table_df.iloc[-1, 4]))  # Get the value in column E (index 4) of the last row
 				prediction['total'] = round(float(last_row_value), 2)
+
+				if total_weight_col_idx != -1:
+						total_weight_value = df.iloc[index-2, total_weight_col_idx]
+						prediction['total_weight'] = round(float(re.sub(r'[^0-9.]+', '', str(total_weight_value))), 2)
+
 				break
 
 		if not table_df.empty:

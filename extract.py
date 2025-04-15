@@ -26,22 +26,10 @@ data_folder = "../ai-data/test-ftp-folder/"
 #data_folder = "E:/A2BFREIGHT_MANAGER/"
 #poppler_path = r"C:\Program Files\poppler-21.03.0\Library\bin"
 
-civ_indices = {'DEANS': 0, 'EMEDCO': 1, 'FALSE': 2, 'NB1': 3, 'NB2': 4, 'NINGBO': 5, 'WHITE_FEATHERS': 6}
-model_ids = {0: "civ_deans", 1: "civ2_2", 6: "wf_neural"}
+civ_indices = {'DEANS': 0, 'EMEDCO': 1, 'FALSE': 2, 'HTL': 3, 'HTL_T&C': 4, 'KOBE': 5, 'NB1': 6, 'NB2': 7, 'NINGBO': 8, 'STARWAY': 9, 'WHITE_FEATHERS': 10, 'ZHONG_SHEN': 11}
+model_ids = {0: "civ_deans", 1: "civ2_2", 5: "civ_kobe_neural_3", 9: "civ_starway", 10: "wf_neural_2", 11: "civ_zhong_shen"}
 carrier_data = {"NB": {"model_1": "civ_nb1", "model_2": "civ_nb2"}}
 
-def special_char_filter(filename):
-    """
-    This function receives a file name string, usually an invoice number, and removes special characters.
-    """
-    return re.sub('[^A-Za-z0-9]+', '', filename)
-
-def table_remove_null(table):
-    indexes = sorted([i for i,x in enumerate(table['goods_description']) if x is None], reverse=True)
-    for col in table:
-        for index in indexes:
-            del table[col][index]
-    return table
 
 def form_recognizer_filter(result):
     prediction={}
@@ -52,7 +40,7 @@ def form_recognizer_filter(result):
             #print("Document was analyzed by model with ID {}".format(result.model_id))
             #print("Document has confidence {}".format(analyzed_document.confidence))
             for name, field in analyzed_document.fields.items():
-                if name=='table':
+                if name=='table' and field.value_array:
                     for row in field.value_array:
                         row_value = row['valueObject']
                         for key, item in row_value.items():
@@ -76,19 +64,18 @@ def form_recognizer_filter(result):
     return prediction
 
 def form_recognizer_one(file_name, page_num, model_id=default_model_id, document="", url=""):
-    page_num = ",".join(map(str, page_num))
+    page_num_form = ",".join(map(str, page_num)) #form recognizer format
 
     if document:
-        poller = document_analysis_client.begin_analyze_document(model_id=model_id, analyze_request=AnalyzeDocumentRequest(bytes_source=document), pages=page_num)
+        poller = document_analysis_client.begin_analyze_document(model_id=model_id, analyze_request=AnalyzeDocumentRequest(bytes_source=document), pages=page_num_form)
     else:
-        poller = document_analysis_client.begin_analyze_document(model_id=model_id, analyze_request=AnalyzeDocumentRequest(url_source=url), pages=page_num)
+        poller = document_analysis_client.begin_analyze_document(model_id=model_id, analyze_request=AnalyzeDocumentRequest(url_source=url), pages=page_num_form)
 
     result: AnalyzeResult = poller.result()
     prediction = form_recognizer_filter(result)
 
     prediction['filename'] = file_name
     prediction['page'] = page_num
-
     return prediction
 
 def multipage_combine(prediction_mult, shared_invoice, pdf_merge = False):
@@ -174,14 +161,14 @@ def push_parsed_inv(predictions, process_id, user_id, uploaded_by, date_uploaded
     cursor.execute("""
         IF EXISTS (SELECT TOP 1 1 FROM [dbo].[document_upload_compile] WHERE [process_id]=%s)
             BEGIN
-            UPDATE [dbo].[document_upload_compile] SET [parsed_inv]=%s WHERE [process_id]=%s
+            UPDATE [dbo].[document_upload_compile] SET [parsed_inv]=%s, [num_pages]=%s  WHERE [process_id]=%s
             END
         ELSE
             BEGIN
             INSERT INTO [dbo].[document_upload_compile] (user_id, process_id, filename, filepath, dateuploaded, uploadedby, status, num_pages, parsed_inv, shipment_num) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             END
         """,
-        (process_id, predictions, process_id, user_id, process_id, filename, file_url, date_uploaded, uploaded_by, "processing", num_pages, predictions, shipment_num)) 
+        (process_id, predictions, num_pages, process_id, user_id, process_id, filename, file_url, date_uploaded, uploaded_by, "processing", num_pages, predictions, shipment_num)) 
 
     conn.commit()
     cursor.close()
@@ -197,7 +184,7 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
     ext = file_ext(filename)
 
     if ext == "pdf":
-        images = convert_from_bytes(file_bytes, grayscale=True, fmt="jpeg") #, poppler_path=poppler_path
+        images = convert_from_bytes(file_bytes, grayscale=True, fmt="jpeg") 
         inputpdf = PdfReader(io.BytesIO(file_bytes), strict=False)
         if inputpdf.is_encrypted:
             try:
@@ -225,8 +212,16 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
                         predictions[split_file_name] = form_recognizer_one(url=file_url, file_name=filename, page_num=classified_pages[pred], model_id=model_ids[pred])
                     else:
                         predictions[split_file_name] = form_recognizer_one(document=file_bytes, file_name=filename, page_num=classified_pages[pred], model_id=model_ids[pred])
+                    if pred == civ_indices['KOBE']:
+                        predictions[split_file_name]['currency'] = clean_currency(predictions[split_file_name]['total'])
+                        predictions[split_file_name]['table'] = table_kobe(predictions[split_file_name]['table'])
+                    elif pred == civ_indices['ZHONG_SHEN']:
+                        predictions[split_file_name]['currency'] = clean_currency(predictions[split_file_name]['total'])
+                        predictions[split_file_name]['table'] = table_zhong(predictions[split_file_name]['table'])
+                        
                     shared_invoice[split_file_name] = predictions[split_file_name]['invoice_number']
-                    predictions[split_file_name]['table'] = table_remove_null(predictions[split_file_name]['table'])
+                    predictions[split_file_name]['total'] = clean_amount(predictions[split_file_name]['total'])
+                    predictions[split_file_name]['table'] = table_filter(predictions[split_file_name]['table'])
 
         if classifier_count.get("NB2") and classifier_count.get("NB1"):
             predictions, shared_invoice = multipage_extraction(classifier_count, "NB2", "NB1", carrier_data["NB"], filename, predictions, shared_invoice, file_bytes=file_bytes)
@@ -235,7 +230,7 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
         pil_image = Image.open(io.BytesIO(file_bytes)).convert('L').convert('RGB') 
         if invoice_page(pil_image) == 1:
             predictions[filename] = form_recognizer_one(document=file_bytes, file_name=filename, page_num=1, model_id=default_model_id)
-            predictions[filename]['table'] = table_remove_null(predictions[filename]['table'])
+            predictions[filename]['table'] = table_filter(predictions[filename]['table'])
     
     elif ext == 'xlsx':
         predictions[filename] = extract_xlsx(pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl', sheet_name=0, header=None))
@@ -254,6 +249,8 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
             #predictions[file]['page'] = [predictions[file]['page']]
 
     for file in predictions:
+        if predictions[file]['currency'] is not None:
+            predictions[file]['currency'] = temp_currency_filter(predictions[file]['currency'])
         predictions = add_webservice_user(predictions, file, user_query)
         predictions[file]['process_id'] = process_id
         predictions[file]['user_id'] = user_id
@@ -262,6 +259,6 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
                 "jsonstring": json.dumps(predictions[file])
                 }
 
-        push_parsed_inv(json.dumps(predictions[file]), process_id, user_id, uploaded_by, date_uploaded, shipment_num, filename, file_url, len(predictions[file]['page']))
+        push_parsed_inv(json.dumps(payload), process_id, user_id, uploaded_by, date_uploaded, shipment_num, filename, file_url, len(predictions[file]['page']))
 
     return payload
