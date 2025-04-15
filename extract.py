@@ -233,7 +233,7 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
             predictions[filename]['table'] = table_filter(predictions[filename]['table'])
     
     elif ext == 'xlsx':
-        predictions[filename] = extract_xlsx(pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl', sheet_name=0, header=None))
+        predictions[filename] = extract_xlsx(file_bytes)
 
     elif ext == 'xls':
         predictions[filename] = extract_xls(pd.read_excel(io.BytesIO(file_bytes), engine='xlrd', sheet_name=0, header=None))
