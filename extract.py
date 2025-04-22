@@ -10,9 +10,9 @@ from collections import defaultdict
 
 from functions import * 
 from excel import *
+from classify import classify_document
 
 from azure.core.exceptions import ResourceNotFoundError
-#from azure.ai.formrecognizer import DocumentAnalysisClient, AnalyzeResult
 from azure.core.credentials import AzureKeyCredential
 
 from azure.ai.documentintelligence import DocumentIntelligenceClient
@@ -23,12 +23,9 @@ credential = AzureKeyCredential("a6a3fb5f929541648c788d45e6566603")
 document_analysis_client = DocumentIntelligenceClient(endpoint, credential)
 default_model_id = "civ2_2"
 data_folder = "../ai-data/test-ftp-folder/"
-#data_folder = "E:/A2BFREIGHT_MANAGER/"
-#poppler_path = r"C:\Program Files\poppler-21.03.0\Library\bin"
 
-civ_indices = {'DEANS': 0, 'EMEDCO': 1, 'FALSE': 2, 'HTL': 3, 'HTL_T&C': 4, 'KOBE': 5, 'NB1': 6, 'NB2': 7, 'NINGBO': 8, 'STARWAY': 9, 'WHITE_FEATHERS': 10, 'ZHONG_SHEN': 11}
-model_ids = {0: "civ_deans", 1: "civ2_2", 5: "civ_kobe_neural_3", 9: "civ_starway", 10: "wf_neural_2", 11: "civ_zhong_shen"}
-carrier_data = {"NB": {"model_1": "civ_nb1", "model_2": "civ_nb2"}}
+model_ids = {'deans': "civ_deans", "dongguan_sunup":"civ_dongguan_sunup", 'emedco': "civ2_2", "htl":"civ_htl_1",'kobe': "civ_kobe_neural_4",'kuka': "civ_kuka", 'kuka_pkl': "civ_kuka_pkl", "nb1": "civ_nb1", "nb2": "civ_nb2", "premier_intl":"civ_premiere", "premier_intl_pkl":"civ_premier_pkl",'starway': "civ_starway", 'white_feathers': "wf_neural_2", 'zhong_shen': "civ_zhong_shen"}
+carrier_data = {"NB": {"nb1": "civ_nb1", "nb2": "civ_nb2"}}
 
 
 def form_recognizer_filter(result):
@@ -54,6 +51,14 @@ def form_recognizer_filter(result):
                     field_value = field.get("valueString") if field.get("valueString") else field.content
                     if field_value:
                         prediction[name] = special_char_filter(field_value)
+                elif name == "container":
+                    field_value = field.get("valueString") if field.get("valueString") else field.content
+                    if field_value:
+                        prediction[name] = container_separate(field_value)
+                elif name == "total_weight":
+                    field_value = field.get("valueString") if field.get("valueString") else field.content
+                    if field_value:
+                        prediction[name] = clean_amount(field_value)
                 else:
                     field_value = field.get("valueString") if field.get("valueString") else field.content
                     prediction[name] = field_value
@@ -67,9 +72,9 @@ def form_recognizer_one(file_name, page_num, model_id=default_model_id, document
     page_num_form = ",".join(map(str, page_num)) #form recognizer format
 
     if document:
-        poller = document_analysis_client.begin_analyze_document(model_id=model_id, analyze_request=AnalyzeDocumentRequest(bytes_source=document), pages=page_num_form)
+        poller = document_analysis_client.begin_analyze_document(model_id=model_id, body=document, pages=page_num_form)
     else:
-        poller = document_analysis_client.begin_analyze_document(model_id=model_id, analyze_request=AnalyzeDocumentRequest(url_source=url), pages=page_num_form)
+        poller = document_analysis_client.begin_analyze_document(model_id=model_id, body={"urlSource": url}, pages=page_num_form)
 
     result: AnalyzeResult = poller.result()
     prediction = form_recognizer_filter(result)
@@ -78,15 +83,17 @@ def form_recognizer_one(file_name, page_num, model_id=default_model_id, document
     prediction['page'] = page_num
     return prediction
 
+def kuka_combine(prediction_mult, shared_invoice):
+    #match table and add wp, then add feather cushion to goods_description
+    return prediction_mult
+
 def multipage_combine(prediction_mult, shared_invoice, pdf_merge = False):
     """
     Receives json file of predictions and dict of shared invoices and 
     combines all pages with the same invoice number.
     """
     try:
-        res = {}
-        for i, v in shared_invoice.items():
-            res[v] = [i] if v not in res.keys() else res[v] + [i]
+        res = merge_by_invoice(shared_invoice)
         merged_predictions = {}
         for invoice_num, pages in res.items():
             page_nums = []
@@ -94,15 +101,15 @@ def multipage_combine(prediction_mult, shared_invoice, pdf_merge = False):
             for idx, page in enumerate(pages):
                 if idx==0:
                     merged_predictions[new_file_name] = prediction_mult[page].copy()
-                    page_nums.append(prediction_mult[page]['page'])
+                    page_nums.extend(prediction_mult[page]['page'])
                 else:
                     for field, item_value in prediction_mult[page].items():
                         if field == 'table':
                             for table_key, table_value in item_value.items():
                                 merged_predictions[new_file_name]['table'][table_key].extend(table_value)
                         elif field == 'page':
-                            page_nums.append(item_value)
-                        elif merged_predictions[new_file_name][field] is None and item_value is not None:
+                            page_nums.extend(item_value)
+                        if field not in merged_predictions[new_file_name] or merged_predictions[new_file_name][field] is None:
                             merged_predictions[new_file_name][field] = item_value
             merged_predictions[new_file_name]['page'] = page_nums
         return merged_predictions
@@ -178,62 +185,61 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
     predictions = {}
     shared_invoice = {}
     classifier_count = collections.defaultdict(list)
-    classified_pages = collections.defaultdict(list)
 
     user_query = query_webservice_user(user_id)
     ext = file_ext(filename)
 
-    if ext == "pdf":
-        images = convert_from_bytes(file_bytes, grayscale=True, fmt="jpeg") 
-        inputpdf = PdfReader(io.BytesIO(file_bytes), strict=False)
-        if inputpdf.is_encrypted:
-            try:
-                inputpdf.decrypt('')
-                #print('File Decrypted (PyPDF2)')
-            except:
-                print("Decryption error")
-        
-        #classify and split
-        for page, image in enumerate(images):
-            pred = classify_page(image)
-            classified_pages[pred].append(page+1)
+    if ext in ["pdf", "jpg", "jpeg", "png",".bmp",".tiff", ".heif"]:
+        classification = classify_document(file_bytes)
+        #print(classification)
+        for key, pages in classification.items():
+            split_file_name = file_name(filename) +"_pg"+str(pages)+"."+ext
 
-        for pred in classified_pages:
-            if pred == civ_indices['FALSE']:
+            if key in ["false", "htl_t&c"]:
                 pass
+            elif key == 'nb1':
+                classifier_count['NB1'].append(pages)
+            elif key == 'nb2':
+                classifier_count['NB2'].append(pages)
             else:
-                split_file_name = file_name(filename) +"_pg"+str(classified_pages[pred])+".pdf"
-                if pred == civ_indices['NB1']:
-                    classifier_count['NB1'].append(classified_pages[pred])
-                elif pred == civ_indices['NB2']:
-                    classifier_count['NB2'].append(classified_pages[pred])
+                if file_url:
+                    predictions[split_file_name] = form_recognizer_one(url=file_url, file_name=filename, page_num=pages, model_id=model_ids[key])
                 else:
-                    if file_url:
-                        predictions[split_file_name] = form_recognizer_one(url=file_url, file_name=filename, page_num=classified_pages[pred], model_id=model_ids[pred])
-                    else:
-                        predictions[split_file_name] = form_recognizer_one(document=file_bytes, file_name=filename, page_num=classified_pages[pred], model_id=model_ids[pred])
-                    if pred == civ_indices['KOBE']:
-                        predictions[split_file_name]['currency'] = clean_currency(predictions[split_file_name]['total'])
-                        predictions[split_file_name]['table'] = table_kobe(predictions[split_file_name]['table'])
-                    elif pred == civ_indices['ZHONG_SHEN']:
-                        predictions[split_file_name]['currency'] = clean_currency(predictions[split_file_name]['total'])
-                        predictions[split_file_name]['table'] = table_zhong(predictions[split_file_name]['table'])
-                        
-                    shared_invoice[split_file_name] = predictions[split_file_name]['invoice_number']
+                    predictions[split_file_name] = form_recognizer_one(document=file_bytes, file_name=filename, page_num=pages, model_id=model_ids[key])
+
+                if key == 'kobe':
+                    predictions[split_file_name]['currency'] = clean_currency(predictions[split_file_name]['total'])
+                    predictions[split_file_name]['table'] = table_kobe(predictions[split_file_name]['table'])
+                elif key == 'zhong_shen':
+                    predictions[split_file_name]['currency'] = clean_currency(predictions[split_file_name]['total'])
+                    predictions[split_file_name]['table'] = table_zhong(predictions[split_file_name]['table'])
+                
+                shared_invoice[split_file_name] = predictions[split_file_name]['invoice_number']
+
+                if predictions[split_file_name].get('total'):
                     predictions[split_file_name]['total'] = clean_amount(predictions[split_file_name]['total'])
-                    predictions[split_file_name]['table'] = table_filter(predictions[split_file_name]['table'])
+
+                if predictions[split_file_name].get('table'):
+                    if key == "htl":
+                        predictions[split_file_name]['table'] = table_htl(predictions[split_file_name]['table'])
+                    else:
+                        predictions[split_file_name]['table'] = table_filter(predictions[split_file_name]['table'])
 
         if classifier_count.get("NB2") and classifier_count.get("NB1"):
             predictions, shared_invoice = multipage_extraction(classifier_count, "NB2", "NB1", carrier_data["NB"], filename, predictions, shared_invoice, file_bytes=file_bytes)
 
-    elif ext in ["jpg", "jpeg", "png",'.bmp','.tiff']:
-        pil_image = Image.open(io.BytesIO(file_bytes)).convert('L').convert('RGB') 
-        if invoice_page(pil_image) == 1:
-            predictions[filename] = form_recognizer_one(document=file_bytes, file_name=filename, page_num=1, model_id=default_model_id)
-            predictions[filename]['table'] = table_filter(predictions[filename]['table'])
-    
+        if classification.get("kuka") and classification.get("kuka_pkl"):
+            predictions = merge_wp_column_with_dataframe(predictions, shared_invoice) #works if you assume civ only has one of each and not mulitple docs
+            for file in predictions:
+                if predictions[file]['classification'] == "kuka":
+                    predictions[file]['table'] = table_kuka(predictions[file]['table'])
+        elif classification.get("kuka"):
+            for file in predictions:
+                predictions[file]['table'] = table_kuka(predictions[file]['table'])
+
+
     elif ext == 'xlsx':
-        predictions[filename] = extract_xlsx(file_bytes)
+        predictions[filename] = extract_xlsx(pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl', sheet_name=0, header=None))
 
     elif ext == 'xls':
         predictions[filename] = extract_xls(pd.read_excel(io.BytesIO(file_bytes), engine='xlrd', sheet_name=0, header=None))
@@ -242,8 +248,8 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
         return "File type not allowed."
 
 
-    #if len(predictions) > 1:
-            #predictions = multipage_combine(predictions, shared_invoice)
+    if len(predictions) > 1:
+        predictions = multipage_combine(predictions, shared_invoice) #skips kuka since it just becomes one prediction 
     #else:
         #for file in predictions:
             #predictions[file]['page'] = [predictions[file]['page']]
