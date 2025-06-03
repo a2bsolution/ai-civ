@@ -24,7 +24,7 @@ document_analysis_client = DocumentIntelligenceClient(endpoint, credential)
 default_model_id = "civ2_2"
 data_folder = "../ai-data/test-ftp-folder/"
 
-model_ids = {'deans': "civ_deans", "dongguan_sunup":"civ_dongguan_sunup", 'emedco': "civ2_2", "htl":"civ_htl_1",'kobe': "civ_kobe_neural_4",'kuka': "civ_kuka", 'kuka_pkl': "civ_kuka_pkl", "nb1": "civ_nb1", "nb2": "civ_nb2", "premier_intl":"civ_premiere", "premier_intl_pkl":"civ_premier_pkl",'starway': "civ_starway", 'white_feathers': "wf_neural_2", 'zhong_shen': "civ_zhong_shen"}
+model_ids = {'deans': "civ_deans", "dongguan_sunup":"civ_dongguan_sunup", 'emedco': "civ2_2", "htl":"civ_htl_1",'kobe': "civ_kobe_neural_4",'kuka': "civ_kuka", 'kuka_pkl': "civ_kuka_pkl", "nb1": "civ_nb1", "nb2": "civ_nb2", "premier_intl":"civ_premiere_1", "premier_intl_pkl":"civ_premier_pkl",'starway': "civ_starway_1", 'white_feathers': "wf_neural_2", 'zhong_shen': "civ_zhong_shen", "shanewsha":"civ_shanewsha_1", "shanewsha_pkl":"pkl_shanewsha"}
 carrier_data = {"NB": {"nb1": "civ_nb1", "nb2": "civ_nb2"}}
 
 
@@ -59,6 +59,10 @@ def form_recognizer_filter(result):
                     field_value = field.get("valueString") if field.get("valueString") else field.content
                     if field_value:
                         prediction[name] = clean_amount(field_value)
+                elif name == "discount":
+                    field_value = field.get("valueString") if field.get("valueString") else field.content
+                    if field_value:
+                        prediction[name] = clean_amount(field_value)
                 else:
                     field_value = field.get("valueString") if field.get("valueString") else field.content
                     prediction[name] = field_value
@@ -82,10 +86,6 @@ def form_recognizer_one(file_name, page_num, model_id=default_model_id, document
     prediction['filename'] = file_name
     prediction['page'] = page_num
     return prediction
-
-def kuka_combine(prediction_mult, shared_invoice):
-    #match table and add wp, then add feather cushion to goods_description
-    return prediction_mult
 
 def multipage_combine(prediction_mult, shared_invoice, pdf_merge = False):
     """
@@ -191,7 +191,7 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
 
     if ext in ["pdf", "jpg", "jpeg", "png",".bmp",".tiff", ".heif"]:
         classification = classify_document(file_bytes)
-        #print(classification)
+        print(classification)
         for key, pages in classification.items():
             split_file_name = file_name(filename) +"_pg"+str(pages)+"."+ext
 
@@ -239,7 +239,7 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
 
 
     elif ext == 'xlsx':
-        predictions[filename] = extract_xlsx(pd.read_excel(io.BytesIO(file_bytes), engine='openpyxl', sheet_name=0, header=None))
+        predictions[filename] = extract_xlsx(file_bytes)
 
     elif ext == 'xls':
         predictions[filename] = extract_xls(pd.read_excel(io.BytesIO(file_bytes), engine='xlrd', sheet_name=0, header=None))

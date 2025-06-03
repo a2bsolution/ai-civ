@@ -45,6 +45,17 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Switch to the non-privileged user to run the application.
 USER appuser
 
+# Create cache dirs with proper permissions BEFORE switching to appuser
+ENV HOME=/app
+ENV HF_HOME=/app/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/app/.cache/huggingface/transformers
+
+RUN mkdir -p /app/.cache/huggingface/transformers && \
+    chmod -R 777 /app/.cache
+
+# Switch to the non-privileged user after creating the cache dirs
+USER appuser
+
 # Copy the source code into the container.
 COPY . /app
 

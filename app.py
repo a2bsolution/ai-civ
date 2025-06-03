@@ -41,7 +41,12 @@ def compare():
             file_url = request.form['file']
             response = requests.get(file_url)
             filename = file_url.rsplit('/', 1)[1]
-            return predict(response.content, filename, process_id, user_id , uploaded_by, date_uploaded, shipment_num, file_url)
+            if response.status_code != 200:
+                raise ValueError(f"Failed to fetch file from URL: {file_url} (Status: {response.status_code})")
+            if not response.content:
+                raise ValueError(f"Downloaded file is empty: {file_url}")
+            else:
+                return predict(response.content, filename, process_id, user_id , uploaded_by, date_uploaded, shipment_num, file_url)
         else:
             file_obj = request.files.getlist('file')[0]
             if file_obj.filename != '':

@@ -12,7 +12,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.prod
-    command: gunicorn --bind=0.0.0.0:5000 --timeout 600 app:app
     expose:
       - 5000
     env_file:

@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd 
 import cv2
 import copy
-import keras
 import os
 import re
 
@@ -10,10 +9,8 @@ from datetime import datetime
 from PyPDF2 import PdfWriter, PdfReader
 from pdf2image import convert_from_path
 from PIL import Image
-from tensorflow.keras.layers import BatchNormalization
 
 ALLOWED_EXTENSIONS = set(['pdf', 'png', 'jpg', 'jpeg', 'bmp', 'docx', 'xlsx', 'xls','tiff'])
-
 
 def special_char_filter(filename):
     """
@@ -31,8 +28,11 @@ def table_remove_null(table, column="goods_description"):
 def table_filter(table, column="goods_description"):
     table = table_remove_null(table, column)
     table['price'] = list(map(clean_amount, table['price']))
+    table['goods_description'] = [val.replace("\n", " ") if isinstance(val, str) else val for val in table['goods_description']]
     if 'unit_price' in table:
         table['unit_price'] = list(map(clean_amount, table['unit_price']))
+    if 'unit_quantity' in table:
+        table['unit_quantity'] = list(map(unit_filter, table['unit_quantity']))
     return table
 
 def table_kobe(table):
@@ -72,6 +72,12 @@ def merge_wp_column_with_dataframe(data_dict, shared_invoice):
             'goods_description': data_dict[pkl_file]['table']['goods_description'],
             'wp': data_dict[pkl_file]['table']['wp']
         })
+
+        # Remove rows where both keys are missing or null
+        pkl_subset = pkl_subset.dropna(subset=['product_code', 'goods_description'])
+
+        # Group by the merge keys and take the first wp value (or use other aggregation logic)
+        pkl_subset = pkl_subset.groupby(['product_code', 'goods_description'], as_index=False).agg({'wp': 'first'})
 
         # Merge wp into main_table using product_code and goods_description
         merged_table = pd.merge(
@@ -123,6 +129,18 @@ def temp_currency_filter(currency):
         print(e)
         return currency
 
+def unit_filter(unit):
+    try:
+        unit = re.sub('[^A-Za-z ]+', '', unit).upper()
+        unit_list = ['PCS', 'PC', 'SETS', 'SET']
+        if unit:
+            for word in words_in_string(unit_list, unit.upper()):
+                return word
+                break
+    except Exception as e:
+        print(e)
+        return unit
+
 
 def clean_currency(value):
     """Standardizes currency values to ISO 4217 codes."""
@@ -144,15 +162,27 @@ def clean_currency(value):
     
     return value  # Default return
 
-def clean_amount(value):
-    """Standardizes the value to a float with 2 decimal places."""
+def clean_amount(value, strict=True):
+    """
+    Converts a value to float.
+    
+    - If strict=True: removes all non-digit and non-dot characters (negatives not allowed).
+    - If strict=False: keeps minus sign and handles formats like '-$1,200.50'.
+    """
     if value is None or str(value).strip() == "":
         return None
-    
+
     try:
-        return float(re.sub(r'[^\d.]', '', str(value)))
+        val_str = str(value).strip()
+        if strict:
+            # Strict: only digits and period
+            val_str = re.sub(r"[^\d.]", "", val_str)
+        else:
+            # Loose: keep digits, dot, and minus sign
+            val_str = re.sub(r"[^\d\.-]", "", val_str)
+        return float(val_str)
     except ValueError:
-        return value  # Return None for corrupt entries
+        return value
 
 def container_separate(containers, pattern="[a-zA-Z]{4}[0-9]{7}"):
     """
