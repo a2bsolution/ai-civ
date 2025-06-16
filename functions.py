@@ -43,7 +43,27 @@ def table_kobe(table):
         if matches:
             result.append(matches[0])
     table['product_code'] = result
+    table['goods_description'] = remove_jp_characters(table['goods_description'])
+    print(table)
     return table
+
+def remove_jp_characters(description):
+    # Assuming `table` is your defaultdict
+    cleaned_goods_description = []
+
+    for desc in description:
+        # Remove Japanese characters: Hiragana (\u3040–\u309F), Katakana (\u30A0–\u30FF), Kanji (\u4E00–\u9FBF)
+        desc = re.sub(r'[\u3040-\u30FF\u4E00-\u9FFF]', '', desc)
+        # Remove corrupted OCR-like artifacts (e.g. [ f& #x ], [ fe#x], etc.)
+        desc = re.sub(r'\[\s*[^]]+\]', '', desc)
+        # remove stray square brackets left behind
+        desc =  re.sub(r'[\[\]【】]', '', desc)
+        # Remove empty or whitespace-only parentheses: (), (   )
+        desc = re.sub(r'\(\s*\)', '', desc)
+        cleaned_goods_description.append(desc.strip())
+
+    # Replace the old list
+    return cleaned_goods_description
 
 def table_htl(table, column="goods_description"):
     table = table_filter(table, column="product_code")
