@@ -24,7 +24,8 @@ document_analysis_client = DocumentIntelligenceClient(endpoint, credential)
 default_model_id = "civ2_2"
 data_folder = "../ai-data/test-ftp-folder/"
 
-model_ids = {'deans': "civ_deans", "dongguan_sunup":"civ_dongguan_sunup", 'emedco': "civ2_2", "htl":"civ_htl_1",'kobe': "civ_kobe_neural_5",'kuka': "civ_kuka", 'kuka_pkl': "civ_kuka_pkl", "nb1": "civ_nb1", "nb2": "civ_nb2", "premier_intl":"civ_premiere_1", "premier_intl_pkl":"civ_premier_pkl",'starway': "civ_starway_1", 'white_feathers': "wf_neural_2", 'zhong_shen': "civ_zhong_shen", "shanewsha":"civ_shanewsha_1", "shanewsha_pkl":"pkl_shanewsha"}
+df = pd.read_csv("models/carrier_to_model_id_mapping.csv")
+model_ids = dict(zip(df['Carrier'], df['Model_ID']))
 carrier_data = {"NB": {"nb1": "civ_nb1", "nb2": "civ_nb2"}}
 
 

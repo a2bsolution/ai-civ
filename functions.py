@@ -44,7 +44,6 @@ def table_kobe(table):
             result.append(matches[0])
     table['product_code'] = result
     table['goods_description'] = remove_jp_characters(table['goods_description'])
-    print(table)
     return table
 
 def remove_jp_characters(description):
