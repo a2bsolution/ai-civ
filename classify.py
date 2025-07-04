@@ -9,7 +9,7 @@ def classify_document(file_bytes):
     endpoint = "https://ai-cargomation.cognitiveservices.azure.com/"
     credential = AzureKeyCredential("a6a3fb5f929541648c788d45e6566603")
     client = DocumentIntelligenceClient(endpoint, credential)
-    classifier_id = "classify_compile_2"#current_app.config["CLASSIFIER_ID"]
+    classifier_id = "classify_compile_4"#current_app.config["CLASSIFIER_ID"]
 
     try:
 

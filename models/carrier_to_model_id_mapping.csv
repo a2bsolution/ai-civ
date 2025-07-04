@@ -3,6 +3,7 @@ deans,civ_deans
 dongguan,civ_dongguan_1
 emedco,civ2_2
 htl,civ_htl_1
+jihua_3515_leather,civ_jihua_3515_leather_0
 kobe,civ_kobe_neural_5
 kuka,civ_kuka_1
 kuka_pkl,civ_kuka_pkl
@@ -10,6 +11,8 @@ nb1,civ_nb1
 nb2,civ_nb2
 premier_intl,civ_premiere_1
 premier_intl_pkl,civ_premier_pkl
+richland_furniture,civ_richland_furniture_0
+richland_furniture_pkl,civ_richland_furniture_pkl_0
 starway,civ_starway_1
 white_feathers,wf_neural_2
 zhong_shen,civ_zhong_shen
