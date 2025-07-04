@@ -5,7 +5,7 @@ set -e  # Exit on error
 # === CONFIGURATION ===
 IMAGE_NAME="ai-civ-web"
 REGISTRY="aicargomation.azurecr.io"
-TAG="dev1"
+TAG="dev2"
 FULL_IMAGE="$REGISTRY/$IMAGE_NAME:$TAG"
 ACR_NAME="aicargomation"
 
@@ -14,7 +14,6 @@ echo "Deploying image: $FULL_IMAGE"
 # === DOCKER & ACR COMMANDS ===
 docker compose down -v
 docker compose build
-docker run --rm --entrypoint "" $IMAGE_NAME:latest echo "Entrypoint active for: image=$IMAGE_NAME:latest, tag=$TAG"
 
 echo "Logging into Azure Container Registry..."
 az acr login --name "$ACR_NAME"
