@@ -5,7 +5,7 @@ set -e  # Exit on error
 # === CONFIGURATION ===
 IMAGE_NAME="ai-civ-web"
 REGISTRY="aicargomation.azurecr.io"
-TAG="dev4"
+TAG="dev5"
 FULL_IMAGE="$REGISTRY/$IMAGE_NAME:$TAG"
 ACR_NAME="aicargomation"
 
