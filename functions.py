@@ -54,6 +54,17 @@ def table_kobe(table):
 
     return table
 
+def jihua_3515_leather(table):
+    result = []
+    for item in table['product_code']:
+        # Use regex to find text inside parentheses
+        matches = re.findall(r'\d{3}-\d{5}', item)
+        if matches:
+            result.append(matches[0])
+    table['product_code'] = result
+
+    return table
+
 def remove_jp_characters(description):
     # Assuming `table` is your defaultdict
     cleaned_goods_description = []

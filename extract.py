@@ -214,6 +214,8 @@ def predict(file_bytes, filename, process_id, user_id, uploaded_by, date_uploade
                 elif key == 'zhong_shen':
                     predictions[split_file_name]['currency'] = clean_currency(predictions[split_file_name]['total'])
                     predictions[split_file_name]['table'] = table_zhong(predictions[split_file_name]['table'])
+                elif key == 'jihua_3515_leather':
+                    predictions[split_file_name]['table'] = jihua_3515_leather(predictions[split_file_name]['table'])
                 
                 shared_invoice[split_file_name] = predictions[split_file_name]['invoice_number']
 
